@@ -10,13 +10,19 @@ const { authenticate, authorize } = require('../middleware/auth');
 // @access  Private
 router.get('/', authenticate, async (req, res) => {
   try {
-    const { student, class: classId, sessionDate, isDeleted } = req.query;
+    const { student, class: classId, sessionDate, startDate, endDate, isDeleted } = req.query;
     const query = {};
 
     // Filters
     if (student) query.student = student;
     if (classId) query.class = classId;
-    if (sessionDate) {
+
+    if (startDate && endDate) {
+      query.sessionDate = {
+        $gte: new Date(startDate),
+        $lte: new Date(endDate)
+      };
+    } else if (sessionDate) {
       const date = new Date(sessionDate);
       const startOfDay = new Date(date.setHours(0, 0, 0, 0));
       const endOfDay = new Date(date.setHours(23, 59, 59, 999));

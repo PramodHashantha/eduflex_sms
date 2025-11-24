@@ -10,6 +10,11 @@ const classSchema = new mongoose.Schema({
     type: String,
     trim: true,
   },
+  grade: {
+    type: String,
+    required: true,
+    trim: true,
+  },
   teacher: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'User',

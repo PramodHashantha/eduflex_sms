@@ -31,8 +31,20 @@ router.get('/', authenticate, async (req, res) => {
         teacher: req.user._id,
         isDeleted: false,
       }).select('_id');
-      const classIds = teacherClasses.map((c) => c._id);
-      query.class = { $in: classIds };
+      const teacherClassIds = teacherClasses.map((c) => c._id.toString());
+
+      if (classId) {
+        // If specific class requested, verify it belongs to teacher
+        if (teacherClassIds.includes(classId)) {
+          query.class = classId;
+        } else {
+          // Requested class not owned by teacher -> return empty
+          return res.json([]);
+        }
+      } else {
+        // No specific class requested -> return all teacher's classes
+        query.class = { $in: teacherClassIds };
+      }
     }
 
     // Students can only see their own enrollments

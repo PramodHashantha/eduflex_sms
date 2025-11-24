@@ -1,16 +1,6 @@
 const mongoose = require('mongoose');
 
 const tuteSchema = new mongoose.Schema({
-  student: {
-    type: mongoose.Schema.Types.ObjectId,
-    ref: 'User',
-    required: true,
-  },
-  class: {
-    type: mongoose.Schema.Types.ObjectId,
-    ref: 'Class',
-    required: true,
-  },
   title: {
     type: String,
     required: true,
@@ -20,19 +10,25 @@ const tuteSchema = new mongoose.Schema({
     type: String,
     trim: true,
   },
-  month: {
-    type: Number,
-    min: 1,
-    max: 12,
+  grade: {
+    type: String,
+    required: true,
+    trim: true,
   },
-  year: {
-    type: Number,
+  month: {
+    type: String, // Format: YYYY-MM
+    required: true,
   },
   fileUrl: {
     type: String,
   },
   fileName: {
     type: String,
+  },
+  createdBy: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'User',
+    required: true,
   },
   isDeleted: {
     type: Boolean,
@@ -41,17 +37,15 @@ const tuteSchema = new mongoose.Schema({
   deletedAt: {
     type: Date,
   },
-  assignedBy: {
-    type: mongoose.Schema.Types.ObjectId,
-    ref: 'User',
-  },
 }, {
   timestamps: true,
 });
 
-// Index for efficient queries
-tuteSchema.index({ student: 1, class: 1 });
-tuteSchema.index({ class: 1, month: 1, year: 1 });
+// Soft delete method
+tuteSchema.methods.softDelete = function () {
+  this.isDeleted = true;
+  this.deletedAt = new Date();
+  return this.save();
+};
 
 module.exports = mongoose.model('Tute', tuteSchema);
-

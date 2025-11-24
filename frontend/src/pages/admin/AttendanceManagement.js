@@ -9,12 +9,24 @@ import {
   Tooltip,
   Checkbox,
   FormControlLabel,
+  Card,
+  CardContent,
+  Table,
+  TableBody,
+  TableCell,
+  TableContainer,
+  TableHead,
+  TableRow,
+  Paper,
+  Avatar,
+  Grid,
+  MenuItem
 } from '@mui/material';
 import AddIcon from '@mui/icons-material/Add';
 import EditIcon from '@mui/icons-material/Edit';
 import DeleteIcon from '@mui/icons-material/Delete';
 import EventIcon from '@mui/icons-material/Event';
-import { attendanceAPI, classesAPI, enrollmentsAPI } from '../../services/api';
+import { attendanceAPI, classesAPI, enrollmentsAPI, usersAPI } from '../../services/api';
 import { useNotification } from '../../contexts/NotificationContext';
 import DataTable from '../../components/DataTable';
 import FormDialog from '../../components/FormDialog';
@@ -32,6 +44,12 @@ const AttendanceManagement = () => {
   const [bulkDialogOpen, setBulkDialogOpen] = useState(false);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [selectedAttendance, setSelectedAttendance] = useState(null);
+
+  // History View State
+  const [selectedMonth, setSelectedMonth] = useState(new Date().toISOString().slice(0, 7));
+  const [students, setStudents] = useState([]);
+  const [attendanceHistory, setAttendanceHistory] = useState([]);
+
   const { showSuccess, showError } = useNotification();
 
   useEffect(() => {
@@ -43,6 +61,18 @@ const AttendanceManagement = () => {
       fetchAttendance();
     }
   }, [selectedClass, sessionDate, page, rowsPerPage]);
+
+  useEffect(() => {
+    if (selectedClass) {
+      fetchStudents();
+    }
+  }, [selectedClass]);
+
+  useEffect(() => {
+    if (selectedClass && selectedMonth) {
+      fetchAttendanceHistory();
+    }
+  }, [selectedClass, selectedMonth]);
 
   const fetchAttendance = async () => {
     setLoading(true);
@@ -67,6 +97,44 @@ const AttendanceManagement = () => {
       setClasses(response.data);
     } catch (error) {
       console.error('Failed to fetch classes:', error);
+    }
+  };
+
+  const fetchStudents = async () => {
+    try {
+      const enrollments = await enrollmentsAPI.getAll({ class: selectedClass, status: 'active', isDeleted: 'false' });
+      const studentIds = enrollments.data.map(e => e.student?._id || e.student);
+      if (studentIds.length > 0) {
+        const studentsRes = await Promise.all(studentIds.map(id => usersAPI.getById(id)));
+        setStudents(studentsRes.map(res => res.data));
+      } else {
+        setStudents([]);
+      }
+    } catch (error) {
+      console.error('Failed to fetch students:', error);
+    }
+  };
+
+  const fetchAttendanceHistory = async () => {
+    try {
+      const [yearStr, monthStr] = selectedMonth.split('-');
+      const year = parseInt(yearStr);
+      const month = parseInt(monthStr);
+
+      const startDate = `${yearStr}-${monthStr}-01`;
+      const endDate = new Date(Date.UTC(year, month, 0)).toISOString().split('T')[0];
+
+      const params = {
+        class: selectedClass,
+        startDate: startDate,
+        endDate: endDate,
+        isDeleted: 'false'
+      };
+
+      const response = await attendanceAPI.getAll(params);
+      setAttendanceHistory(response.data);
+    } catch (error) {
+      console.error("Failed to fetch history", error);
     }
   };
 
@@ -104,6 +172,7 @@ const AttendanceManagement = () => {
       showSuccess('Attendance record deleted successfully');
       setDeleteDialogOpen(false);
       fetchAttendance();
+      fetchAttendanceHistory();
     } catch (error) {
       showError(error.response?.data?.message || 'Failed to delete attendance');
     }
@@ -120,6 +189,7 @@ const AttendanceManagement = () => {
       }
       setDialogOpen(false);
       fetchAttendance();
+      fetchAttendanceHistory();
     } catch (error) {
       showError(error.response?.data?.message || 'Failed to save attendance');
     }
@@ -140,6 +210,7 @@ const AttendanceManagement = () => {
       showSuccess('Attendance marked for all students');
       setBulkDialogOpen(false);
       fetchAttendance();
+      fetchAttendanceHistory();
     } catch (error) {
       showError(error.response?.data?.message || 'Failed to mark attendance');
     }
@@ -225,6 +296,11 @@ const AttendanceManagement = () => {
     },
   ];
 
+  // Calculate unique dates for history columns
+  const uniqueDates = [...new Set(attendanceHistory.map(h => {
+    return new Date(h.sessionDate).toISOString().split('T')[0];
+  }))].sort();
+
   return (
     <Box>
       <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
@@ -285,6 +361,107 @@ const AttendanceManagement = () => {
         onRowsPerPageChange={setRowsPerPage}
         emptyMessage="No attendance records found"
       />
+
+      {/* History View */}
+      <Box sx={{ mt: 4 }}>
+        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
+          <Typography variant="h6">Attendance History</Typography>
+          <TextField
+            type="month"
+            size="small"
+            value={selectedMonth}
+            onChange={(e) => setSelectedMonth(e.target.value)}
+          />
+        </Box>
+        <Card sx={{ borderRadius: 2, boxShadow: '0 2px 10px rgba(0,0,0,0.05)' }}>
+          <CardContent>
+            <TableContainer component={Paper} elevation={0} variant="outlined">
+              <Table size="small">
+                <TableHead sx={{ bgcolor: '#f5f5f5' }}>
+                  <TableRow>
+                    <TableCell sx={{ fontWeight: 'bold' }}>Student</TableCell>
+                    {uniqueDates.map((date) => (
+                      <TableCell key={date} align="center" sx={{ minWidth: 30, px: 0, color: 'text.secondary', fontSize: '0.75rem' }}>
+                        {new Date(date).getDate()}
+                      </TableCell>
+                    ))}
+                    <TableCell align="right" sx={{ fontWeight: 'bold' }}>Rate</TableCell>
+                  </TableRow>
+                </TableHead>
+                <TableBody>
+                  {students.map((student) => {
+                    const studentHistory = attendanceHistory.filter(
+                      h => (h.student?._id || h.student) === student._id
+                    );
+
+                    const presentDays = studentHistory.filter(h => h.isPresent).length;
+                    const totalDays = studentHistory.length;
+                    const rate = totalDays > 0 ? Math.round((presentDays / totalDays) * 100) : 0;
+
+                    return (
+                      <TableRow key={student._id} hover>
+                        <TableCell sx={{ display: 'flex', alignItems: 'center', gap: 1.5, py: 1.5 }}>
+                          <Avatar src={student.profilePicture} sx={{ width: 32, height: 32 }}>
+                            {student.firstName[0]}
+                          </Avatar>
+                          <Typography variant="body2" fontWeight={500}>
+                            {student.firstName} {student.lastName}
+                          </Typography>
+                        </TableCell>
+                        {uniqueDates.map((date) => {
+                          const record = studentHistory.find(h => {
+                            return new Date(h.sessionDate).toISOString().split('T')[0] === date;
+                          });
+
+                          let status = null;
+                          let color = 'text.disabled';
+                          if (record) {
+                            status = record.isPresent ? 'P' : 'A';
+                            color = record.isPresent ? 'success.main' : 'error.main';
+                          }
+
+                          return (
+                            <TableCell key={date} align="center" sx={{ px: 0 }}>
+                              <Typography
+                                variant="caption"
+                                sx={{
+                                  color,
+                                  fontWeight: 'bold',
+                                  display: 'inline-block',
+                                  width: 20,
+                                  textAlign: 'center'
+                                }}
+                              >
+                                {status || '-'}
+                              </Typography>
+                            </TableCell>
+                          );
+                        })}
+                        <TableCell align="right">
+                          <Chip
+                            label={`${rate}%`}
+                            size="small"
+                            color={rate < 75 ? 'error' : 'success'}
+                            variant={rate < 75 ? 'outlined' : 'filled'}
+                            sx={{ fontWeight: 'bold' }}
+                          />
+                        </TableCell>
+                      </TableRow>
+                    );
+                  })}
+                  {students.length === 0 && (
+                    <TableRow>
+                      <TableCell colSpan={uniqueDates.length + 2} align="center" sx={{ py: 4, color: 'text.secondary' }}>
+                        No data available. Select a class to view history.
+                      </TableCell>
+                    </TableRow>
+                  )}
+                </TableBody>
+              </Table>
+            </TableContainer>
+          </CardContent>
+        </Card>
+      </Box>
 
       <FormDialog
         open={dialogOpen}

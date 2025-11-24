@@ -4,31 +4,44 @@ import {
   Typography,
   Button,
   TextField,
-  IconButton,
-  Chip,
+  Card,
+  CardContent,
+  Table,
+  TableBody,
+  TableCell,
+  TableContainer,
+  TableHead,
+  TableRow,
+  Paper,
+  Avatar,
+  InputAdornment,
+  Checkbox,
+  Grid,
   Tooltip,
+  Chip,
+  Divider
 } from '@mui/material';
-import AddIcon from '@mui/icons-material/Add';
-import EditIcon from '@mui/icons-material/Edit';
-import DeleteIcon from '@mui/icons-material/Delete';
+import SaveIcon from '@mui/icons-material/Save';
+import SearchIcon from '@mui/icons-material/Search';
+import AttachMoneyIcon from '@mui/icons-material/AttachMoney';
 import { feesAPI, classesAPI, enrollmentsAPI, usersAPI } from '../../services/api';
 import { useAuth } from '../../contexts/AuthContext';
 import { useNotification } from '../../contexts/NotificationContext';
-import DataTable from '../../components/DataTable';
-import FormDialog from '../../components/FormDialog';
-import ConfirmDialog from '../../components/ConfirmDialog';
 
 const FeesManagement = () => {
-  const [fees, setFees] = useState([]);
-  const [students, setStudents] = useState([]);
+  // Unified State
   const [classes, setClasses] = useState([]);
   const [selectedClass, setSelectedClass] = useState('');
+  const [selectedMonth, setSelectedMonth] = useState(new Date().toISOString().slice(0, 7));
+  const [selectedDate, setSelectedDate] = useState(new Date().toISOString().split('T')[0]);
+
   const [loading, setLoading] = useState(false);
-  const [page, setPage] = useState(0);
-  const [rowsPerPage, setRowsPerPage] = useState(10);
-  const [dialogOpen, setDialogOpen] = useState(false);
-  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
-  const [selectedFee, setSelectedFee] = useState(null);
+
+  // Data State
+  const [studentFees, setStudentFees] = useState([]); // For Daily Marking
+  const [feesHistory, setFeesHistory] = useState([]); // For History Grid
+  const [students, setStudents] = useState([]); // All students in class
+
   const { user } = useAuth();
   const { showSuccess, showError } = useNotification();
 
@@ -36,25 +49,17 @@ const FeesManagement = () => {
     fetchClasses();
   }, []);
 
+  // Update Date when Month changes to ensure it's valid
   useEffect(() => {
-    if (selectedClass) {
-      fetchStudentsForClass();
-      fetchFees();
+    if (selectedMonth) {
+      const [year, month] = selectedMonth.split('-');
+      const date = new Date(selectedDate);
+      if (date.getMonth() + 1 !== parseInt(month) || date.getFullYear() !== parseInt(year)) {
+        // Default to 1st of the new month
+        setSelectedDate(`${selectedMonth}-01`);
+      }
     }
-  }, [selectedClass, page, rowsPerPage]);
-
-  const fetchFees = async () => {
-    if (!selectedClass) return;
-    setLoading(true);
-    try {
-      const response = await feesAPI.getAll({ class: selectedClass, isDeleted: 'false' });
-      setFees(response.data);
-    } catch (error) {
-      showError(error.response?.data?.message || 'Failed to fetch fees');
-    } finally {
-      setLoading(false);
-    }
-  };
+  }, [selectedMonth]);
 
   const fetchClasses = async () => {
     try {
@@ -65,247 +70,310 @@ const FeesManagement = () => {
     }
   };
 
-  const fetchStudentsForClass = async () => {
-    try {
-      const enrollments = await enrollmentsAPI.getAll({ class: selectedClass, status: 'active', isDeleted: 'false' });
-      const studentIds = enrollments.data.map(e => e.student?._id || e.student);
-      if (studentIds.length > 0) {
-        const studentsRes = await Promise.all(studentIds.map(id => usersAPI.getById(id)));
-        setStudents(studentsRes.map(res => res.data));
-      } else {
-        setStudents([]);
-      }
-    } catch (error) {
-      console.error('Failed to fetch students:', error);
-      setStudents([]);
-    }
-  };
-
-  const handleCreate = () => {
-    if (!selectedClass) {
-      showError('Please select a class first');
+  const handleLoad = async () => {
+    if (!selectedClass || !selectedMonth || !selectedDate) {
+      showError('Please select class, month, and date');
       return;
     }
-    setSelectedFee(null);
-    setDialogOpen(true);
-  };
-
-  const handleEdit = (fee) => {
-    setSelectedFee({
-      ...fee,
-      student: fee.student?._id || fee.student,
-      class: fee.class?._id || fee.class,
-      paymentDate: fee.paymentDate ? new Date(fee.paymentDate).toISOString().split('T')[0] : '',
-      dueDate: fee.dueDate ? new Date(fee.dueDate).toISOString().split('T')[0] : '',
-    });
-    setDialogOpen(true);
-  };
-
-  const handleDelete = (fee) => {
-    setSelectedFee(fee);
-    setDeleteDialogOpen(true);
-  };
-
-  const confirmDelete = async () => {
+    setLoading(true);
     try {
-      await feesAPI.delete(selectedFee._id);
-      showSuccess('Fee record deleted successfully');
-      setDeleteDialogOpen(false);
-      fetchFees();
-    } catch (error) {
-      showError(error.response?.data?.message || 'Failed to delete fee');
-    }
-  };
+      // 1. Fetch Students
+      const enrollmentsRes = await enrollmentsAPI.getAll({ class: selectedClass, status: 'active', isDeleted: 'false' });
+      const studentIds = enrollmentsRes.data.map(e => e.student?._id || e.student);
 
-  const handleSubmit = async (formData) => {
-    try {
-      if (selectedFee) {
-        await feesAPI.update(selectedFee._id, formData);
-        showSuccess('Fee updated successfully');
-      } else {
-        await feesAPI.create({ ...formData, class: selectedClass });
-        showSuccess('Fee recorded successfully');
+      let studentsData = [];
+      if (studentIds.length > 0) {
+        const studentsRes = await Promise.all(studentIds.map(id => usersAPI.getById(id)));
+        studentsData = studentsRes.map(res => res.data);
       }
-      setDialogOpen(false);
-      fetchFees();
+      setStudents(studentsData);
+
+      // 2. Fetch Daily Fees (for Marking)
+      const dailyFeesRes = await feesAPI.getAll({
+        class: selectedClass,
+        paymentDate: selectedDate,
+        isDeleted: 'false'
+      });
+
+      // Merge for Marking List
+      const merged = studentsData.map(student => {
+        const fee = dailyFeesRes.data.find(f => (f.student?._id || f.student) === student._id);
+        return {
+          studentId: student._id,
+          firstName: student.firstName,
+          lastName: student.lastName,
+          userId: student.userId,
+          profilePicture: student.profilePicture,
+          isPaid: !!fee,
+          amount: fee ? fee.amount : '',
+          feeId: fee ? fee._id : null
+        };
+      });
+      setStudentFees(merged);
+
+      // 3. Fetch Monthly History (for Grid)
+      const [yearStr, monthStr] = selectedMonth.split('-');
+      const year = parseInt(yearStr);
+      const month = parseInt(monthStr);
+      const startDate = `${yearStr}-${monthStr}-01`;
+      const endDate = new Date(Date.UTC(year, month, 0)).toISOString().split('T')[0];
+
+      const historyRes = await feesAPI.getAll({
+        class: selectedClass,
+        startDate,
+        endDate,
+        isDeleted: 'false'
+      });
+      setFeesHistory(historyRes.data);
+
     } catch (error) {
-      showError(error.response?.data?.message || 'Failed to save fee');
+      showError('Failed to load data');
+      console.error(error);
+    } finally {
+      setLoading(false);
     }
   };
 
-  const columns = [
-    {
-      id: 'student',
-      label: 'Student',
-      format: (value) => {
-        if (typeof value === 'object' && value) {
-          return `${value.firstName} ${value.lastName} (${value.userId})`;
-        }
-        return '-';
-      },
-    },
-    {
-      id: 'paymentType',
-      label: 'Type',
-      format: (value) => <Chip label={value} size="small" />,
-    },
-    {
-      id: 'amount',
-      label: 'Amount',
-      format: (value) => `$${value?.toFixed(2) || '0.00'}`,
-    },
-    {
-      id: 'status',
-      label: 'Status',
-      format: (value) => (
-        <Chip
-          label={value}
-          color={value === 'paid' ? 'success' : 'warning'}
-          size="small"
-        />
-      ),
-    },
-    {
-      id: 'paymentDate',
-      label: 'Payment Date',
-      format: (value) => (value ? new Date(value).toLocaleDateString() : '-'),
-    },
-    {
-      id: 'actions',
-      label: 'Actions',
-      align: 'right',
-      format: (value, row) => (
-        <Box>
-          <Tooltip title="Edit">
-            <IconButton size="small" onClick={() => handleEdit(row)}>
-              <EditIcon fontSize="small" />
-            </IconButton>
-          </Tooltip>
-          <Tooltip title="Delete">
-            <IconButton size="small" onClick={() => handleDelete(row)} color="error">
-              <DeleteIcon fontSize="small" />
-            </IconButton>
-          </Tooltip>
-        </Box>
-      ),
-    },
-  ];
+  const handleFeeChange = (index, field, value) => {
+    const updated = [...studentFees];
+    updated[index][field] = value;
+    setStudentFees(updated);
+  };
 
-  const formFields = [
-    {
-      name: 'student',
-      label: 'Student',
-      type: 'select',
-      required: true,
-      options: students.map((s) => ({
-        value: s._id,
-        label: `${s.firstName} ${s.lastName} (${s.userId})`,
-      })),
-    },
-    {
-      name: 'paymentType',
-      label: 'Payment Type',
-      type: 'select',
-      required: true,
-      options: [
-        { value: 'daily', label: 'Daily' },
-        { value: 'per-session', label: 'Per Session' },
-        { value: 'monthly', label: 'Monthly' },
-      ],
-    },
-    {
-      name: 'amount',
-      label: 'Amount',
-      type: 'number',
-      required: true,
-    },
-    {
-      name: 'paymentDate',
-      label: 'Payment Date',
-      type: 'date',
-      required: true,
-    },
-    {
-      name: 'dueDate',
-      label: 'Due Date',
-      type: 'date',
-    },
-    {
-      name: 'status',
-      label: 'Status',
-      type: 'select',
-      options: [
-        { value: 'paid', label: 'Paid' },
-        { value: 'pending', label: 'Pending' },
-      ],
-    },
-    {
-      name: 'notes',
-      label: 'Notes',
-      multiline: true,
-      rows: 3,
-    },
-  ];
+  const handleSave = async () => {
+    try {
+      const feesToSave = studentFees.map(item => ({
+        student: item.studentId,
+        isPaid: item.isPaid,
+        amount: item.amount ? parseFloat(item.amount) : 0,
+        notes: ''
+      }));
+
+      const payload = {
+        class: selectedClass,
+        paymentDate: selectedDate,
+        amount: 0,
+        students: feesToSave
+      };
+
+      await feesAPI.bulkCreate(payload);
+      showSuccess('Fees saved successfully');
+      handleLoad(); // Refresh both views
+    } catch (error) {
+      showError('Failed to save fees');
+      console.error(error);
+    }
+  };
+
+  const getDaysInMonth = (year, month) => {
+    return new Date(year, month, 0).getDate();
+  };
+
+  const renderHistoryGrid = () => {
+    if (!selectedMonth || students.length === 0) return null;
+
+    // Identify days with payments
+    const activeDays = new Set();
+    feesHistory.forEach(f => {
+      const fDate = new Date(f.paymentDate);
+      activeDays.add(fDate.getDate());
+    });
+
+    // Filter days to show only those with payments, sorted
+    const days = Array.from(activeDays).sort((a, b) => a - b);
+
+    if (days.length === 0) {
+      return <Typography sx={{ mt: 2, fontStyle: 'italic', color: 'text.secondary' }}>No payments recorded for this month.</Typography>;
+    }
+
+    return (
+      <TableContainer component={Paper} variant="outlined" sx={{ maxHeight: 600, mt: 2 }}>
+        <Table stickyHeader size="small">
+          <TableHead>
+            <TableRow>
+              <TableCell sx={{ fontWeight: 'bold', backgroundColor: '#f5f5f5' }}>Student Name</TableCell>
+              {days.map(day => (
+                <TableCell key={day} align="center" sx={{ fontWeight: 'bold', backgroundColor: '#f5f5f5' }}>
+                  {day}
+                </TableCell>
+              ))}
+              <TableCell align="right" sx={{ fontWeight: 'bold', backgroundColor: '#f5f5f5' }}>Total</TableCell>
+            </TableRow>
+          </TableHead>
+          <TableBody>
+            {students.map(student => {
+              // Get all fees for this student in the current month history
+              const studentFees = feesHistory.filter(f => (f.student?._id || f.student) === student._id);
+
+              // Calculate total
+              const total = studentFees.reduce((sum, fee) => sum + (fee.amount || 0), 0);
+
+              return (
+                <TableRow key={student._id} hover>
+                  <TableCell>{student.firstName} {student.lastName}</TableCell>
+                  {days.map(day => {
+                    // Find fee for this specific day
+                    const feeForDay = studentFees.find(f => new Date(f.paymentDate).getDate() === day);
+                    return (
+                      <TableCell key={day} align="center">
+                        {feeForDay ? (
+                          <Chip
+                            label={feeForDay.amount}
+                            size="small"
+                            color="success"
+                            variant="outlined"
+                          />
+                        ) : '-'}
+                      </TableCell>
+                    );
+                  })}
+                  <TableCell align="right" sx={{ fontWeight: 'bold' }}>
+                    {total > 0 ? total : '-'}
+                  </TableCell>
+                </TableRow>
+              );
+            })}
+          </TableBody>
+        </Table>
+      </TableContainer>
+    );
+  };
 
   return (
-    <Box>
-      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
-        <Typography variant="h4">Fees Management</Typography>
-        <Button variant="contained" startIcon={<AddIcon />} onClick={handleCreate} disabled={!selectedClass}>
-          Record Fee
-        </Button>
-      </Box>
+    <Box sx={{ p: 3 }}>
+      <Typography variant="h4" gutterBottom>Fees Management</Typography>
 
-      <Box sx={{ display: 'flex', gap: 2, mb: 3, flexWrap: 'wrap' }}>
-        <TextField
-          select
-          label="Class"
-          variant="outlined"
-          size="small"
-          value={selectedClass}
-          onChange={(e) => setSelectedClass(e.target.value)}
-          sx={{ minWidth: 200 }}
-          SelectProps={{ native: true }}
-        >
-          <option value="">Select Class</option>
-          {classes.map((c) => (
-            <option key={c._id} value={c._id}>
-              {c.className}
-            </option>
-          ))}
-        </TextField>
-      </Box>
+      {/* Controls */}
+      <Card sx={{ mb: 3 }}>
+        <CardContent>
+          <Grid container spacing={2} alignItems="center">
+            <Grid item xs={12} md={3}>
+              <TextField
+                select
+                fullWidth
+                label="Class"
+                value={selectedClass}
+                onChange={(e) => setSelectedClass(e.target.value)}
+                SelectProps={{ native: true }}
+              >
+                <option value="">Select Class</option>
+                {classes.map((cls) => (
+                  <option key={cls._id} value={cls._id}>{cls.className}</option>
+                ))}
+              </TextField>
+            </Grid>
+            <Grid item xs={12} md={3}>
+              <TextField
+                type="month"
+                fullWidth
+                label="Month"
+                value={selectedMonth}
+                onChange={(e) => setSelectedMonth(e.target.value)}
+                InputLabelProps={{ shrink: true }}
+              />
+            </Grid>
+            <Grid item xs={12} md={3}>
+              <TextField
+                type="date"
+                fullWidth
+                label="Date"
+                value={selectedDate}
+                onChange={(e) => setSelectedDate(e.target.value)}
+                InputLabelProps={{ shrink: true }}
+              />
+            </Grid>
+            <Grid item xs={12} md={3}>
+              <Button
+                variant="contained"
+                startIcon={<SearchIcon />}
+                onClick={handleLoad}
+                disabled={loading}
+                fullWidth
+              >
+                Load Data
+              </Button>
+            </Grid>
+          </Grid>
+        </CardContent>
+      </Card>
 
-      <DataTable
-        columns={columns}
-        data={fees}
-        loading={loading}
-        page={page}
-        rowsPerPage={rowsPerPage}
-        totalRows={fees.length}
-        onPageChange={setPage}
-        onRowsPerPageChange={setRowsPerPage}
-        emptyMessage="No fee records found. Select a class to view fees."
-      />
+      {/* Daily Marking Section */}
+      {studentFees.length > 0 && (
+        <Card sx={{ mb: 3 }}>
+          <CardContent>
+            <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 2 }}>
+              <Typography variant="h6">
+                Daily Fees - {selectedDate}
+              </Typography>
+              <Button
+                variant="contained"
+                color="primary"
+                startIcon={<SaveIcon />}
+                onClick={handleSave}
+              >
+                Save Changes
+              </Button>
+            </Box>
+            <TableContainer component={Paper} variant="outlined" sx={{ maxHeight: 500 }}>
+              <Table stickyHeader size="small">
+                <TableHead>
+                  <TableRow>
+                    <TableCell>Student</TableCell>
+                    <TableCell align="center">Status</TableCell>
+                    <TableCell align="right">Amount</TableCell>
+                  </TableRow>
+                </TableHead>
+                <TableBody>
+                  {studentFees.map((student, index) => (
+                    <TableRow key={student.studentId} hover>
+                      <TableCell>
+                        <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+                          <Avatar src={student.profilePicture} alt={student.firstName} />
+                          <Box>
+                            <Typography variant="subtitle2">{student.firstName} {student.lastName}</Typography>
+                            <Typography variant="caption" color="textSecondary">{student.userId}</Typography>
+                          </Box>
+                        </Box>
+                      </TableCell>
+                      <TableCell align="center">
+                        <Checkbox
+                          checked={student.isPaid || false}
+                          onChange={(e) => handleFeeChange(index, 'isPaid', e.target.checked)}
+                          color="success"
+                        />
+                      </TableCell>
+                      <TableCell align="right">
+                        <TextField
+                          size="small"
+                          type="number"
+                          value={student.amount}
+                          onChange={(e) => handleFeeChange(index, 'amount', e.target.value)}
+                          InputProps={{
+                            startAdornment: <InputAdornment position="start">$</InputAdornment>,
+                          }}
+                          sx={{ width: 120 }}
+                        />
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </TableContainer>
+          </CardContent>
+        </Card>
+      )}
 
-      <FormDialog
-        open={dialogOpen}
-        onClose={() => setDialogOpen(false)}
-        title={selectedFee ? 'Edit Fee' : 'Record Fee'}
-        fields={formFields}
-        initialValues={selectedFee || {}}
-        onSubmit={handleSubmit}
-      />
+      <Divider sx={{ my: 4 }} />
 
-      <ConfirmDialog
-        open={deleteDialogOpen}
-        onClose={() => setDeleteDialogOpen(false)}
-        onConfirm={confirmDelete}
-        title="Delete Fee"
-        message="Are you sure you want to delete this fee record?"
-        confirmLabel="Delete"
-        confirmColor="error"
-      />
+      {/* History Section */}
+      {students.length > 0 && (
+        <Card>
+          <CardContent>
+            <Typography variant="h6" sx={{ mb: 2 }}>Fees History for {selectedMonth}</Typography>
+            {renderHistoryGrid()}
+          </CardContent>
+        </Card>
+      )}
     </Box>
   );
 };

@@ -46,6 +46,7 @@ export const feesAPI = {
   getAll: (params) => api.get('/fees', { params }),
   getById: (id) => api.get(`/fees/${id}`),
   create: (data) => api.post('/fees', data),
+  bulkCreate: (data) => api.post('/fees/bulk', data),
   update: (id, data) => api.put(`/fees/${id}`, data),
   delete: (id) => api.delete(`/fees/${id}`),
 };
@@ -55,9 +56,11 @@ export const tutesAPI = {
   getAll: (params) => api.get('/tutes', { params }),
   getById: (id) => api.get(`/tutes/${id}`),
   create: (data) => api.post('/tutes', data),
-  bulkCreate: (data) => api.post('/tutes/bulk', data),
   update: (id, data) => api.put(`/tutes/${id}`, data),
   delete: (id) => api.delete(`/tutes/${id}`),
+  assign: (data) => api.post('/tutes/assign', data),
+  syncAssignments: (data) => api.post('/tutes/sync', data),
+  getAssignments: (params) => api.get('/tutes/assignments', { params }),
 };
 
 // Assignments API

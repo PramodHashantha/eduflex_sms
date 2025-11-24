@@ -13,8 +13,6 @@ const feeSchema = new mongoose.Schema({
   },
   paymentType: {
     type: String,
-    enum: ['daily', 'per-session', 'monthly'],
-    required: true,
   },
   amount: {
     type: Number,

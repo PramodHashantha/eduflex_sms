@@ -10,7 +10,8 @@ const { authenticate, authorize } = require('../middleware/auth');
 // @access  Private
 router.get('/', authenticate, async (req, res) => {
   try {
-    const { teacher, isDeleted, search } = req.query;
+    const { teacher, isDeleted, search, grade } = req.query;
+    console.log('GET /api/classes Query Params:', req.query);
     const query = {};
 
     // Deleted filter
@@ -23,6 +24,11 @@ router.get('/', authenticate, async (req, res) => {
     // Teacher filter
     if (teacher) {
       query.teacher = teacher;
+    }
+
+    // Grade filter
+    if (grade) {
+      query.grade = grade;
     }
 
     // Search filter
@@ -49,6 +55,7 @@ router.get('/', authenticate, async (req, res) => {
       query._id = { $in: classIds };
     }
 
+    console.log('GET /api/classes MongoDB Query:', query);
     const classes = await Class.find(query)
       .populate('teacher', 'firstName lastName userId')
       .populate('createdBy', 'firstName lastName userId')
@@ -104,10 +111,14 @@ router.get('/:id', authenticate, async (req, res) => {
 // @access  Private (Admin, Teacher)
 router.post('/', authenticate, authorize('admin', 'teacher'), async (req, res) => {
   try {
-    const { className, description, schedule, teacher } = req.body;
+    const { className, description, schedule, teacher, grade } = req.body;
 
     if (!className) {
       return res.status(400).json({ message: 'Please provide className' });
+    }
+
+    if (!grade) {
+      return res.status(400).json({ message: 'Please provide grade' });
     }
 
     // Determine teacher
@@ -130,6 +141,7 @@ router.post('/', authenticate, authorize('admin', 'teacher'), async (req, res) =
       className,
       description,
       schedule,
+      grade,
       teacher: teacherId,
       createdBy: req.user._id,
     });
@@ -152,7 +164,7 @@ router.post('/', authenticate, authorize('admin', 'teacher'), async (req, res) =
 // @access  Private (Admin, Teacher)
 router.put('/:id', authenticate, authorize('admin', 'teacher'), async (req, res) => {
   try {
-    const { className, description, schedule, teacher } = req.body;
+    const { className, description, schedule, teacher, grade } = req.body;
 
     const classDoc = await Class.findById(req.params.id);
 
@@ -169,6 +181,7 @@ router.put('/:id', authenticate, authorize('admin', 'teacher'), async (req, res)
     if (className) classDoc.className = className;
     if (description !== undefined) classDoc.description = description;
     if (schedule !== undefined) classDoc.schedule = schedule;
+    if (grade) classDoc.grade = grade;
 
     // Only admin can change teacher
     if (teacher && req.user.role === 'admin') {

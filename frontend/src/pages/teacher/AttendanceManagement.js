@@ -6,32 +6,47 @@ import {
   TextField,
   IconButton,
   Chip,
-  Tooltip,
+  Card,
+  CardContent,
+  Grid,
+  Avatar,
+  Divider,
+  Stack,
+  MenuItem,
+  Table,
+  TableBody,
+  TableCell,
+  TableContainer,
+  TableHead,
+  TableRow,
+  Paper,
+  Tooltip
 } from '@mui/material';
-import AddIcon from '@mui/icons-material/Add';
-import EditIcon from '@mui/icons-material/Edit';
-import DeleteIcon from '@mui/icons-material/Delete';
-import EventIcon from '@mui/icons-material/Event';
+import SaveIcon from '@mui/icons-material/Save';
+import CheckCircleIcon from '@mui/icons-material/CheckCircle';
+import CancelIcon from '@mui/icons-material/Cancel';
+import DownloadIcon from '@mui/icons-material/Download';
+import EmailIcon from '@mui/icons-material/Email';
+import HistoryIcon from '@mui/icons-material/History';
+import CalendarMonthIcon from '@mui/icons-material/CalendarMonth';
+import RemoveIcon from '@mui/icons-material/Remove';
 import { attendanceAPI, classesAPI, enrollmentsAPI, usersAPI } from '../../services/api';
 import { useAuth } from '../../contexts/AuthContext';
 import { useNotification } from '../../contexts/NotificationContext';
-import DataTable from '../../components/DataTable';
-import FormDialog from '../../components/FormDialog';
-import ConfirmDialog from '../../components/ConfirmDialog';
 
 const AttendanceManagement = () => {
   const [attendance, setAttendance] = useState([]);
   const [classes, setClasses] = useState([]);
   const [students, setStudents] = useState([]);
   const [selectedClass, setSelectedClass] = useState('');
+  const [selectedMonth, setSelectedMonth] = useState(new Date().toISOString().slice(0, 7)); // YYYY-MM
   const [sessionDate, setSessionDate] = useState(new Date().toISOString().split('T')[0]);
   const [loading, setLoading] = useState(false);
-  const [page, setPage] = useState(0);
-  const [rowsPerPage, setRowsPerPage] = useState(10);
-  const [dialogOpen, setDialogOpen] = useState(false);
-  const [bulkDialogOpen, setBulkDialogOpen] = useState(false);
-  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
-  const [selectedAttendance, setSelectedAttendance] = useState(null);
+  const [attendanceHistory, setAttendanceHistory] = useState([]);
+
+  // Local state for marking attendance before saving
+  const [markedAttendance, setMarkedAttendance] = useState({});
+
   const { user } = useAuth();
   const { showSuccess, showError } = useNotification();
 
@@ -39,38 +54,20 @@ const AttendanceManagement = () => {
     fetchClasses();
   }, []);
 
-  useEffect(() => {
-    if (selectedClass) {
-      fetchStudentsForClass();
-    }
-  }, [selectedClass]);
+  const handleMonthChange = (e) => {
+    const newMonth = e.target.value;
+    setSelectedMonth(newMonth);
 
-  useEffect(() => {
-    if (selectedClass && sessionDate) {
-      fetchAttendance();
-    }
-  }, [selectedClass, sessionDate, page, rowsPerPage]);
-
-  const fetchAttendance = async () => {
-    setLoading(true);
-    try {
-      const params = {
-        class: selectedClass,
-        sessionDate: sessionDate,
-        isDeleted: 'false',
-      };
-      const response = await attendanceAPI.getAll(params);
-      setAttendance(response.data);
-    } catch (error) {
-      showError(error.response?.data?.message || 'Failed to fetch attendance');
-    } finally {
-      setLoading(false);
+    // Auto-select the first day of the new month
+    if (newMonth) {
+      const [year, month] = newMonth.split('-');
+      const newDate = `${year}-${month}-01`;
+      setSessionDate(newDate);
     }
   };
 
   const fetchClasses = async () => {
     try {
-      // Teacher can only see their own classes
       const response = await classesAPI.getAll({ isDeleted: 'false', teacher: user._id });
       setClasses(response.data);
     } catch (error) {
@@ -78,263 +75,523 @@ const AttendanceManagement = () => {
     }
   };
 
-  const fetchStudentsForClass = async () => {
-    try {
-      const enrollments = await enrollmentsAPI.getAll({ class: selectedClass, status: 'active', isDeleted: 'false' });
-      const studentIds = enrollments.data.map(e => e.student?._id || e.student);
-      if (studentIds.length > 0) {
-        const studentsRes = await Promise.all(studentIds.map(id => usersAPI.getById(id)));
-        setStudents(studentsRes.map(res => res.data));
-      } else {
-        setStudents([]);
-      }
-    } catch (error) {
-      console.error('Failed to fetch students:', error);
-      setStudents([]);
-    }
-  };
-
-  const handleCreate = () => {
-    if (!selectedClass) {
-      showError('Please select a class first');
-      return;
-    }
-    setSelectedAttendance(null);
-    setDialogOpen(true);
-  };
-
-  const handleBulkMark = async () => {
+  const handleLoadAttendance = async () => {
     if (!selectedClass || !sessionDate) {
       showError('Please select a class and date');
       return;
     }
-    // Fetch enrolled students
-    const enrollments = await enrollmentsAPI.getAll({ class: selectedClass, status: 'active', isDeleted: 'false' });
-    const studentList = enrollments.data.map(e => ({
-      id: e.student?._id || e.student,
-      name: `${e.student?.firstName} ${e.student?.lastName}`,
-      isPresent: true,
-    }));
-
-    const bulkData = {
-      class: selectedClass,
-      sessionDate: sessionDate,
-      students: studentList.map(s => ({ student: s.id, isPresent: s.isPresent })),
-    };
-
+    setLoading(true);
     try {
-      await attendanceAPI.bulkCreate(bulkData);
-      showSuccess('Attendance marked for all students');
-      fetchAttendance();
-    } catch (error) {
-      showError(error.response?.data?.message || 'Failed to mark attendance');
-    }
-  };
+      // 1. Fetch Students
+      const enrollments = await enrollmentsAPI.getAll({ class: selectedClass, status: 'active', isDeleted: 'false' });
+      const studentIds = enrollments.data.map(e => e.student?._id || e.student);
 
-  const handleEdit = (attendance) => {
-    setSelectedAttendance({
-      ...attendance,
-      student: attendance.student?._id || attendance.student,
-      class: attendance.class?._id || attendance.class,
-      sessionDate: attendance.sessionDate ? new Date(attendance.sessionDate).toISOString().split('T')[0] : '',
-    });
-    setDialogOpen(true);
-  };
-
-  const handleDelete = (attendance) => {
-    setSelectedAttendance(attendance);
-    setDeleteDialogOpen(true);
-  };
-
-  const confirmDelete = async () => {
-    try {
-      await attendanceAPI.delete(selectedAttendance._id);
-      showSuccess('Attendance record deleted successfully');
-      setDeleteDialogOpen(false);
-      fetchAttendance();
-    } catch (error) {
-      showError(error.response?.data?.message || 'Failed to delete attendance');
-    }
-  };
-
-  const handleSubmit = async (formData) => {
-    try {
-      if (selectedAttendance) {
-        await attendanceAPI.update(selectedAttendance._id, formData);
-        showSuccess('Attendance updated successfully');
-      } else {
-        await attendanceAPI.create({ ...formData, class: selectedClass });
-        showSuccess('Attendance marked successfully');
+      let studentsData = [];
+      if (studentIds.length > 0) {
+        const studentsRes = await Promise.all(studentIds.map(id => usersAPI.getById(id)));
+        studentsData = studentsRes.map(res => res.data);
       }
-      setDialogOpen(false);
-      fetchAttendance();
+      setStudents(studentsData);
+
+      // 2. Fetch Attendance for the specific date
+      const params = {
+        class: selectedClass,
+        sessionDate: sessionDate,
+        isDeleted: 'false',
+      };
+      const response = await attendanceAPI.getAll(params);
+      setAttendance(response.data);
+
+      // 3. Initialize Marked Attendance
+      const newMarks = {};
+      studentsData.forEach(s => {
+        newMarks[s._id] = { isPresent: false, status: 'pending', _id: null };
+      });
+
+      response.data.forEach(record => {
+        const studentId = record.student?._id || record.student;
+        if (newMarks[studentId]) {
+          newMarks[studentId] = {
+            isPresent: record.isPresent,
+            status: record.isPresent ? 'present' : 'absent',
+            _id: record._id
+          };
+        }
+      });
+      setMarkedAttendance(newMarks);
+
+      // 4. Fetch History for the month
+      await fetchAttendanceHistory();
+
     } catch (error) {
-      showError(error.response?.data?.message || 'Failed to save attendance');
+      console.error('Failed to load data:', error);
+      showError('Failed to load attendance data');
+    } finally {
+      setLoading(false);
+    }
+  };
+  const fetchAttendanceHistory = async () => {
+    try {
+      const [yearStr, monthStr] = selectedMonth.split('-');
+      const year = parseInt(yearStr);
+      const month = parseInt(monthStr);
+
+      const startDate = `${yearStr}-${monthStr}-01`;
+      // Use Date.UTC to ensure we get the correct date regardless of local timezone
+      const endDate = new Date(Date.UTC(year, month, 0)).toISOString().split('T')[0];
+
+      const params = {
+        class: selectedClass,
+        startDate: startDate,
+        endDate: endDate,
+        isDeleted: 'false'
+      };
+
+      const response = await attendanceAPI.getAll(params);
+      setAttendanceHistory(response.data);
+    } catch (error) {
+      console.error("Failed to fetch history", error);
     }
   };
 
-  const columns = [
-    {
-      id: 'student',
-      label: 'Student',
-      format: (value) => {
-        if (typeof value === 'object' && value) {
-          return `${value.firstName} ${value.lastName} (${value.userId})`;
-        }
-        return '-';
-      },
-    },
-    {
-      id: 'sessionDate',
-      label: 'Date',
-      format: (value) => (value ? new Date(value).toLocaleDateString() : '-'),
-    },
-    {
-      id: 'isPresent',
-      label: 'Status',
-      format: (value) => (
-        <Chip
-          label={value ? 'Present' : 'Absent'}
-          color={value ? 'success' : 'error'}
-          size="small"
-        />
-      ),
-    },
-    {
-      id: 'notes',
-      label: 'Notes',
-      format: (value) => value || '-',
-    },
-    {
-      id: 'actions',
-      label: 'Actions',
-      align: 'right',
-      format: (value, row) => (
-        <Box>
-          <Tooltip title="Edit">
-            <IconButton size="small" onClick={() => handleEdit(row)}>
-              <EditIcon fontSize="small" />
-            </IconButton>
-          </Tooltip>
-          <Tooltip title="Delete">
-            <IconButton size="small" onClick={() => handleDelete(row)} color="error">
-              <DeleteIcon fontSize="small" />
-            </IconButton>
-          </Tooltip>
-        </Box>
-      ),
-    },
-  ];
+  const handleMarkStatus = (studentId, status) => {
+    setMarkedAttendance(prev => ({
+      ...prev,
+      [studentId]: {
+        ...prev[studentId],
+        isPresent: status === 'present',
+        status: status
+      }
+    }));
+  };
 
-  const formFields = [
-    {
-      name: 'student',
-      label: 'Student',
-      type: 'select',
-      required: true,
-      options: students.map((s) => ({
-        value: s._id,
-        label: `${s.firstName} ${s.lastName} (${s.userId})`,
-      })),
-    },
-    {
-      name: 'sessionDate',
-      label: 'Session Date',
-      type: 'date',
-      required: true,
-    },
-    {
-      name: 'isPresent',
-      label: 'Present',
-      type: 'checkbox',
-    },
-    {
-      name: 'notes',
-      label: 'Notes',
-      multiline: true,
-      rows: 3,
-    },
-  ];
+  const handleMarkAllPresent = () => {
+    const newMarks = { ...markedAttendance };
+    Object.keys(newMarks).forEach(key => {
+      newMarks[key] = { ...newMarks[key], isPresent: true, status: 'present' };
+    });
+    setMarkedAttendance(newMarks);
+  };
+
+  const handleSaveAttendance = async () => {
+    if (!selectedClass || !sessionDate) {
+      showError('Please select a class and date');
+      return;
+    }
+
+    setLoading(true);
+    try {
+      const promises = Object.keys(markedAttendance).map(async (studentId) => {
+        const mark = markedAttendance[studentId];
+        if (mark.status === 'pending') return;
+
+        const payload = {
+          class: selectedClass,
+          sessionDate: sessionDate,
+          student: studentId,
+          isPresent: mark.isPresent
+        };
+
+        if (mark._id) {
+          return attendanceAPI.update(mark._id, payload);
+        } else {
+          return attendanceAPI.create(payload);
+        }
+      });
+
+      await Promise.all(promises);
+      showSuccess('Attendance saved successfully');
+
+      // Refresh data to get new IDs and ensure consistency
+      handleLoadAttendance();
+
+    } catch (error) {
+      showError('Failed to save attendance');
+      console.error(error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Calculate stats
+  const totalStudents = students.length;
+  const presentCount = Object.values(markedAttendance).filter(m => m.status === 'present').length;
+  const absentCount = Object.values(markedAttendance).filter(m => m.status === 'absent').length;
+  const attendanceRate = totalStudents > 0 ? Math.round((presentCount / totalStudents) * 100) : 0;
+
+  // Calculate unique dates for history columns
+  const uniqueDates = [...new Set(attendanceHistory.map(h => {
+    return new Date(h.sessionDate).toISOString().split('T')[0];
+  }))].sort();
 
   return (
-    <Box>
-      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
-        <Typography variant="h4">Attendance Management</Typography>
-        <Box sx={{ display: 'flex', gap: 2 }}>
-          <Button
-            variant="outlined"
-            startIcon={<EventIcon />}
-            onClick={handleBulkMark}
-            disabled={!selectedClass || !sessionDate}
-          >
-            Bulk Mark
-          </Button>
-          <Button variant="contained" startIcon={<AddIcon />} onClick={handleCreate}>
-            Mark Attendance
-          </Button>
-        </Box>
-      </Box>
+    <Box sx={{ p: 3 }}>
+      {/* Header Controls */}
+      <Card sx={{ mb: 3, p: 2, borderRadius: 2, boxShadow: '0 2px 10px rgba(0,0,0,0.05)' }}>
+        <Typography variant="h6" sx={{ mb: 2, fontWeight: 600 }}>Attendance Controls</Typography>
+        <Grid container spacing={3} alignItems="center">
+          <Grid item xs={12} md={3}>
+            <Typography variant="caption" color="textSecondary" display="block" sx={{ mb: 0.5 }}>Select Class</Typography>
+            <TextField
+              select
+              fullWidth
+              value={selectedClass}
+              onChange={(e) => setSelectedClass(e.target.value)}
+              size="small"
+              sx={{ bgcolor: 'background.paper' }}
+              SelectProps={{ displayEmpty: true }}
+            >
+              <MenuItem value="" disabled>Select Class</MenuItem>
+              {classes.map((c) => (
+                <MenuItem key={c._id} value={c._id}>
+                  {c.className}
+                </MenuItem>
+              ))}
+            </TextField>
+          </Grid>
+          <Grid item xs={12} md={3}>
+            <Typography variant="caption" color="textSecondary" display="block" sx={{ mb: 0.5 }}>Select Month</Typography>
+            <TextField
+              type="month"
+              fullWidth
+              value={selectedMonth}
+              onChange={handleMonthChange}
+              disabled={!selectedClass}
+              size="small"
+              sx={{ bgcolor: 'background.paper' }}
+            />
+          </Grid>
+          <Grid item xs={12} md={3}>
+            <Typography variant="caption" color="textSecondary" display="block" sx={{ mb: 0.5 }}>Select Date</Typography>
+            <TextField
+              type="date"
+              fullWidth
+              value={sessionDate}
+              onChange={(e) => setSessionDate(e.target.value)}
+              disabled={!selectedMonth}
+              inputProps={{
+                min: selectedMonth ? `${selectedMonth}-01` : undefined,
+                max: selectedMonth ? new Date(new Date(selectedMonth).getFullYear(), new Date(selectedMonth).getMonth() + 1, 0).toISOString().split('T')[0] : undefined
+              }}
+              size="small"
+              sx={{ bgcolor: 'background.paper' }}
+            />
+          </Grid>
+          <Grid item xs={12} md={3} sx={{ display: 'flex', alignItems: 'flex-end' }}>
+            <Button
+              variant="contained"
+              fullWidth
+              onClick={handleLoadAttendance}
+              disabled={!selectedClass || !sessionDate || loading}
+              sx={{ height: 40, textTransform: 'none', fontWeight: 600 }}
+            >
+              {loading ? 'Loading...' : 'Load Attendance'}
+            </Button>
+          </Grid>
+        </Grid>
+      </Card>
 
-      <Box sx={{ display: 'flex', gap: 2, mb: 3, flexWrap: 'wrap' }}>
-        <TextField
-          select
-          label="Class"
-          variant="outlined"
-          size="small"
-          value={selectedClass}
-          onChange={(e) => setSelectedClass(e.target.value)}
-          sx={{ minWidth: 200 }}
-          SelectProps={{ native: true }}
-        >
-          <option value="">Select Class</option>
-          {classes.map((c) => (
-            <option key={c._id} value={c._id}>
-              {c.className}
-            </option>
-          ))}
-        </TextField>
-        <TextField
-          type="date"
-          label="Session Date"
-          variant="outlined"
-          size="small"
-          value={sessionDate}
-          onChange={(e) => setSessionDate(e.target.value)}
-          InputLabelProps={{ shrink: true }}
-          sx={{ minWidth: 200 }}
-        />
-      </Box>
+      <Grid container spacing={3}>
+        {/* Main Attendance List */}
+        <Grid item xs={12} md={8}>
+          <Card sx={{ height: '100%', borderRadius: 2, boxShadow: '0 2px 10px rgba(0,0,0,0.05)' }}>
+            <Box sx={{ p: 2, display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid #eee' }}>
+              <Typography variant="h6" fontWeight={600}>
+                Today's Attendance - {classes.find(c => c._id === selectedClass)?.className || ''}
+              </Typography>
+              <Box sx={{ display: 'flex', gap: 1 }}>
+                <Button
+                  variant="text"
+                  color="success"
+                  startIcon={<CheckCircleIcon />}
+                  onClick={handleMarkAllPresent}
+                  disabled={students.length === 0}
+                  sx={{ textTransform: 'none', fontWeight: 600 }}
+                >
+                  Mark All Present
+                </Button>
+                <Button
+                  variant="contained"
+                  startIcon={<SaveIcon />}
+                  onClick={handleSaveAttendance}
+                  disabled={students.length === 0 || loading}
+                  sx={{ textTransform: 'none', fontWeight: 600 }}
+                >
+                  Save Attendance
+                </Button>
+              </Box>
+            </Box>
+            <CardContent sx={{ maxHeight: '600px', overflowY: 'auto', bgcolor: '#fafafa' }}>
+              {students.length === 0 ? (
+                <Box sx={{ py: 8, textAlign: 'center' }}>
+                  <Typography color="textSecondary">
+                    Select a class and date, then click "Load Attendance" to start.
+                  </Typography>
+                </Box>
+              ) : (
+                <Stack spacing={2}>
+                  {students.map((student) => {
+                    const mark = markedAttendance[student._id] || { status: 'pending' };
+                    return (
+                      <Paper
+                        key={student._id}
+                        elevation={0}
+                        sx={{
+                          p: 2,
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'space-between',
+                          borderRadius: 2,
+                          border: '1px solid',
+                          borderColor: mark.status === 'present' ? '#a5d6a7' :
+                            mark.status === 'absent' ? '#ef9a9a' : '#eee',
+                          bgcolor: mark.status === 'present' ? '#e8f5e9' :
+                            mark.status === 'absent' ? '#ffebee' : 'white',
+                          transition: 'all 0.2s',
+                          '&:hover': {
+                            boxShadow: '0 4px 12px rgba(0,0,0,0.05)',
+                            borderColor: mark.status === 'present' ? '#81c784' :
+                              mark.status === 'absent' ? '#e57373' : '#e0e0e0'
+                          }
+                        }}
+                      >
+                        <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+                          <Avatar
+                            src={student.profilePicture}
+                            alt={student.firstName}
+                            sx={{ width: 48, height: 48 }}
+                          >
+                            {student.firstName[0]}
+                          </Avatar>
+                          <Box>
+                            <Typography variant="subtitle1" fontWeight="bold">
+                              {student.firstName} {student.lastName}
+                            </Typography>
+                            <Typography variant="body2" color="textSecondary">
+                              Roll No: {student.userId}
+                            </Typography>
+                          </Box>
+                        </Box>
+                        <Box sx={{ display: 'flex', gap: 1 }}>
+                          <Button
+                            variant={mark.status === 'present' ? 'contained' : 'outlined'}
+                            color="success"
+                            startIcon={<CheckCircleIcon />}
+                            onClick={() => handleMarkStatus(student._id, 'present')}
+                            sx={{
+                              textTransform: 'none',
+                              minWidth: 100,
+                              boxShadow: mark.status === 'present' ? 2 : 0
+                            }}
+                          >
+                            Present
+                          </Button>
+                          <Button
+                            variant={mark.status === 'absent' ? 'contained' : 'outlined'}
+                            color="error"
+                            startIcon={<CancelIcon />}
+                            onClick={() => handleMarkStatus(student._id, 'absent')}
+                            sx={{
+                              textTransform: 'none',
+                              minWidth: 100,
+                              boxShadow: mark.status === 'absent' ? 2 : 0
+                            }}
+                          >
+                            Absent
+                          </Button>
+                        </Box>
+                      </Paper>
+                    );
+                  })}
+                </Stack>
+              )}
+            </CardContent>
+          </Card>
+        </Grid>
 
-      <DataTable
-        columns={columns}
-        data={attendance}
-        loading={loading}
-        page={page}
-        rowsPerPage={rowsPerPage}
-        totalRows={attendance.length}
-        onPageChange={setPage}
-        onRowsPerPageChange={setRowsPerPage}
-        emptyMessage="No attendance records found. Select a class and date to view records."
-      />
+        {/* Sidebar Widgets */}
+        <Grid item xs={12} md={4}>
+          <Stack spacing={3}>
+            {/* Summary Widget */}
+            <Card sx={{ borderRadius: 2, boxShadow: '0 2px 10px rgba(0,0,0,0.05)' }}>
+              <CardContent>
+                <Typography variant="h6" gutterBottom fontWeight={600}>Attendance Summary</Typography>
+                <Stack spacing={2}>
+                  <Paper elevation={0} sx={{ p: 2, bgcolor: '#e8f5e9', display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderRadius: 2 }}>
+                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
+                      <Box sx={{ p: 1, bgcolor: 'white', borderRadius: '50%', display: 'flex' }}>
+                        <CheckCircleIcon color="success" fontSize="small" />
+                      </Box>
+                      <Box>
+                        <Typography variant="subtitle2" fontWeight={600}>Present</Typography>
+                        <Typography variant="caption" color="textSecondary">Today</Typography>
+                      </Box>
+                    </Box>
+                    <Typography variant="h4" color="success.main" fontWeight={700}>{presentCount}</Typography>
+                  </Paper>
+                  <Paper elevation={0} sx={{ p: 2, bgcolor: '#ffebee', display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderRadius: 2 }}>
+                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
+                      <Box sx={{ p: 1, bgcolor: 'white', borderRadius: '50%', display: 'flex' }}>
+                        <CancelIcon color="error" fontSize="small" />
+                      </Box>
+                      <Box>
+                        <Typography variant="subtitle2" fontWeight={600}>Absent</Typography>
+                        <Typography variant="caption" color="textSecondary">Today</Typography>
+                      </Box>
+                    </Box>
+                    <Typography variant="h4" color="error.main" fontWeight={700}>{absentCount}</Typography>
+                  </Paper>
+                  <Paper elevation={0} sx={{ p: 2, bgcolor: '#e3f2fd', display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderRadius: 2 }}>
+                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
+                      <Box sx={{ p: 1, bgcolor: 'white', borderRadius: '50%', display: 'flex' }}>
+                        <HistoryIcon color="primary" fontSize="small" />
+                      </Box>
+                      <Box>
+                        <Typography variant="subtitle2" fontWeight={600}>Attendance Rate</Typography>
+                        <Typography variant="caption" color="textSecondary">This Session</Typography>
+                      </Box>
+                    </Box>
+                    <Typography variant="h4" color="primary.main" fontWeight={700}>{attendanceRate}%</Typography>
+                  </Paper>
+                </Stack>
+              </CardContent>
+            </Card>
 
-      <FormDialog
-        open={dialogOpen}
-        onClose={() => setDialogOpen(false)}
-        title={selectedAttendance ? 'Edit Attendance' : 'Mark Attendance'}
-        fields={formFields}
-        initialValues={selectedAttendance || { sessionDate, class: selectedClass }}
-        onSubmit={handleSubmit}
-      />
+            {/* Quick Actions Widget */}
+            <Card sx={{ borderRadius: 2, boxShadow: '0 2px 10px rgba(0,0,0,0.05)' }}>
+              <CardContent>
+                <Typography variant="h6" gutterBottom fontWeight={600}>Quick Actions</Typography>
+                <Stack spacing={1}>
+                  <Button
+                    variant="text"
+                    startIcon={<DownloadIcon />}
+                    sx={{ justifyContent: 'flex-start', color: 'text.primary', py: 1.5, px: 2, bgcolor: '#f5f5f5', '&:hover': { bgcolor: '#eeeeee' } }}
+                  >
+                    Export Attendance
+                  </Button>
+                  <Button
+                    variant="text"
+                    startIcon={<EmailIcon />}
+                    sx={{ justifyContent: 'flex-start', color: 'text.primary', py: 1.5, px: 2, bgcolor: '#f5f5f5', '&:hover': { bgcolor: '#eeeeee' } }}
+                  >
+                    Send Report to Parents
+                  </Button>
+                  <Button
+                    variant="text"
+                    startIcon={<HistoryIcon />}
+                    sx={{ justifyContent: 'flex-start', color: 'text.primary', py: 1.5, px: 2, bgcolor: '#f5f5f5', '&:hover': { bgcolor: '#eeeeee' } }}
+                  >
+                    View Monthly Report
+                  </Button>
+                </Stack>
+              </CardContent>
+            </Card>
+          </Stack>
+        </Grid>
 
-      <ConfirmDialog
-        open={deleteDialogOpen}
-        onClose={() => setDeleteDialogOpen(false)}
-        onConfirm={confirmDelete}
-        title="Delete Attendance"
-        message="Are you sure you want to delete this attendance record?"
-        confirmLabel="Delete"
-        confirmColor="error"
-      />
+        {/* History Table */}
+        <Grid item xs={12}>
+          <Card sx={{ borderRadius: 2, boxShadow: '0 2px 10px rgba(0,0,0,0.05)' }}>
+            <CardContent>
+              <Typography variant="h6" gutterBottom fontWeight={600}>
+                {selectedMonth} - Attendance History
+              </Typography>
+              <TableContainer component={Paper} elevation={0} variant="outlined">
+                <Table size="small">
+                  <TableHead sx={{ bgcolor: '#f5f5f5' }}>
+                    <TableRow>
+                      <TableCell sx={{ fontWeight: 'bold', borderRight: '1px solid #e0e0e0' }}>Student</TableCell>
+                      {uniqueDates.map((date) => {
+                        const d = new Date(date);
+                        const dayName = d.toLocaleDateString('en-US', { weekday: 'short' });
+                        const dayNum = d.getDate();
+                        return (
+                          <TableCell key={date} align="center" sx={{ minWidth: 40, px: 0.5, borderRight: '1px solid #e0e0e0' }}>
+                            <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
+                              <Typography variant="caption" color="textSecondary" sx={{ fontSize: '0.7rem', lineHeight: 1 }}>
+                                {dayName}
+                              </Typography>
+                              <Typography variant="body2" fontWeight="bold" sx={{ lineHeight: 1.2 }}>
+                                {dayNum}
+                              </Typography>
+                            </Box>
+                          </TableCell>
+                        );
+                      })}
+                      <TableCell align="right" sx={{ fontWeight: 'bold' }}>Rate</TableCell>
+                    </TableRow>
+                  </TableHead>
+                  <TableBody>
+                    {students.map((student) => {
+                      const studentHistory = attendanceHistory.filter(
+                        h => (h.student?._id || h.student) === student._id
+                      );
+
+                      const presentDays = studentHistory.filter(h => h.isPresent).length;
+                      const totalDays = studentHistory.length;
+                      const rate = totalDays > 0 ? Math.round((presentDays / totalDays) * 100) : 0;
+
+                      return (
+                        <TableRow key={student._id} hover>
+                          <TableCell sx={{ display: 'flex', alignItems: 'center', gap: 1.5, py: 1.5, borderRight: '1px solid #e0e0e0' }}>
+                            <Avatar src={student.profilePicture} sx={{ width: 32, height: 32 }}>
+                              {student.firstName[0]}
+                            </Avatar>
+                            <Typography variant="body2" fontWeight={500}>
+                              {student.firstName} {student.lastName}
+                            </Typography>
+                          </TableCell>
+                          {uniqueDates.map((date) => {
+                            const record = studentHistory.find(h => {
+                              return new Date(h.sessionDate).toISOString().split('T')[0] === date;
+                            });
+
+                            return (
+                              <TableCell key={date} align="center" sx={{ px: 0, borderRight: '1px solid #e0e0e0' }}>
+                                {record ? (
+                                  record.isPresent ? (
+                                    <Tooltip title="Present">
+                                      <CheckCircleIcon color="success" fontSize="small" />
+                                    </Tooltip>
+                                  ) : (
+                                    <Tooltip title="Absent">
+                                      <CancelIcon color="error" fontSize="small" />
+                                    </Tooltip>
+                                  )
+                                ) : (
+                                  <Tooltip title="No Record">
+                                    <RemoveIcon color="disabled" fontSize="small" />
+                                  </Tooltip>
+                                )}
+                              </TableCell>
+                            );
+                          })}
+                          <TableCell align="right">
+                            <Chip
+                              label={`${rate}%`}
+                              size="small"
+                              color={rate < 75 ? 'error' : 'success'}
+                              variant={rate < 75 ? 'outlined' : 'filled'}
+                              sx={{ fontWeight: 'bold' }}
+                            />
+                          </TableCell>
+                        </TableRow>
+                      );
+                    })}
+                    {students.length === 0 && (
+                      <TableRow>
+                        <TableCell colSpan={uniqueDates.length + 2} align="center" sx={{ py: 4, color: 'text.secondary' }}>
+                          No data available
+                        </TableCell>
+                      </TableRow>
+                    )}
+                  </TableBody>
+                </Table>
+              </TableContainer>
+            </CardContent>
+          </Card>
+        </Grid>
+      </Grid>
     </Box>
   );
 };
